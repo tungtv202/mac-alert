@@ -1,0 +1,9 @@
+{
+  "projects": [
+    {
+      "path": "~/workplace/my-supporter",
+      "name": "My Supporter",
+      "icon": "~/workplace/my-supporter/static/favicon.png"
+    }
+  ]
+}

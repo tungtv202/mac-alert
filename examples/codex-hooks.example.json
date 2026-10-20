@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.codex/bin/mac-alert\" --message Codex --color green --duration 2s --position bottom-right",
+            "timeout": 2,
+            "statusMessage": "Showing Mac alert"
+          }
+        ]
+      }
+    ]
+  }
+}
