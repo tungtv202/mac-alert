@@ -291,18 +291,46 @@ func threadTitle(_ event: [String: Any], codexHome: URL? = nil) -> String? {
     return fallback
 }
 
-func resultSummary(_ message: String) -> String {
+func isEmptyAlertContent(_ message: String) -> Bool {
+    // Strip fence markers so an empty JSON code block is empty too.
+    let content = message.components(separatedBy: .newlines).filter {
+        let line = $0.trimmingCharacters(in: .whitespaces)
+        return !line.hasPrefix("```") && !line.hasPrefix("~~~")
+    }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    if content.isEmpty { return true }
+    guard let value = try? JSONSerialization.jsonObject(with: Data(content.utf8), options: [.fragmentsAllowed]) else {
+        return false
+    }
+    return isEmptyJSONValue(value)
+}
+
+func isEmptyJSONValue(_ value: Any) -> Bool {
+    if value is NSNull { return true }
+    if let text = value as? String { return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    if let items = value as? [Any] { return items.allSatisfy(isEmptyJSONValue) }
+    if let fields = value as? [String: Any] { return fields.values.allSatisfy(isEmptyJSONValue) }
+    // Numbers and booleans (including zero and false) carry information.
+    return false
+}
+
+func resultSummary(_ message: String) -> String? {
+    guard !isEmptyAlertContent(message) else { return nil }
     var fenced = false
+    var codeSummary: String?
     for raw in message.components(separatedBy: .newlines) {
         var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if line.hasPrefix("```") || line.hasPrefix("~~~") { fenced.toggle(); continue }
-        if fenced || line.isEmpty || line.hasPrefix("::") { continue }
+        if line.isEmpty || line.hasPrefix("::") { continue }
+        if fenced {
+            if codeSummary == nil { codeSummary = condensed(line, limit: 95) }
+            continue
+        }
         line = line.replacingOccurrences(of: #"!?\[([^\]]+)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
         line = line.replacingOccurrences(of: #"^\s*(?:#{1,6}\s*|[-*>]\s+|\d+[.)]\s+)"#, with: "", options: .regularExpression)
         line = line.replacingOccurrences(of: #"[`*_]"#, with: "", options: .regularExpression)
         if !line.trimmingCharacters(in: .whitespaces).isEmpty { return condensed(line, limit: 95) }
     }
-    return "Đã kết thúc lượt xử lý."
+    return codeSummary
 }
 
 func readHookEvent() -> [String: Any]? {
@@ -325,9 +353,12 @@ func readHookEvent() -> [String: Any]? {
     return event
 }
 
-func applyingHookEvent(_ event: [String: Any]?, to original: Options, projects: [ProjectAlert], at date: Date = Date()) -> Options {
-    guard let event,
-          event["hook_event_name"] as? String == "Stop" || event["type"] as? String == "agent-turn-complete" else { return original }
+func applyingHookEvent(_ event: [String: Any]?, to original: Options, projects: [ProjectAlert], at date: Date = Date()) -> Options? {
+    guard let event else { return original }
+    guard event["hook_event_name"] as? String == "Stop" || event["type"] as? String == "agent-turn-complete",
+          let summary = resultSummary(event["last_assistant_message"] as? String ?? event["last-assistant-message"] as? String ?? "") else {
+        return nil
+    }
     var options = original
     let rawCwd = event["cwd"] as? String ?? ""
     let cwd = rawCwd.isEmpty ? "" : URL(fileURLWithPath: rawCwd).standardizedFileURL.path
@@ -337,7 +368,7 @@ func applyingHookEvent(_ event: [String: Any]?, to original: Options, projects: 
     }.max { $0.path.count < $1.path.count }
     let projectName = project?.name ?? (cwd.isEmpty ? "" : URL(fileURLWithPath: cwd).lastPathComponent)
     options.title = projectName.isEmpty ? "Codex" : "Codex · " + condensed(projectName, limit: 32)
-    options.message = resultSummary(event["last_assistant_message"] as? String ?? event["last-assistant-message"] as? String ?? "")
+    options.message = summary
     options.subtitle = threadTitle(event) ?? eventThreadID(event).map { "Thread " + String($0.prefix(8)) } ?? ""
     options.dynamicContent = true
     if original.iconPath == nil, let path = project?.icon {
@@ -505,8 +536,13 @@ if !parsedOptions.subtitleProvided && parsedOptions.subtitle.isEmpty {
 let settingsURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/mac-alert-projects.json")
 let settings = (try? Data(contentsOf: settingsURL)).flatMap { try? JSONDecoder().decode(AlertSettings.self, from: $0) }
 let hookEvent = parsedOptions.readEvent ? readHookEvent() : nil
-let options = applyingHookEvent(hookEvent,
-                                to: parsedOptions, projects: settings?.projects ?? [])
+guard let options = applyingHookEvent(hookEvent,
+                                     to: parsedOptions, projects: settings?.projects ?? []),
+      !isEmptyAlertContent(options.message) else {
+    // Acknowledge the hook without starting a child process or touching AppKit.
+    if hookEvent != nil { print("{}") }
+    exit(0)
+}
 
 // Let the Stop hook return promptly; its two-second timeout must not kill the
 // popup or make the turn wait for the display duration. No shell is involved.

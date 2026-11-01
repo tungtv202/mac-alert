@@ -75,7 +75,7 @@ Khi nhận JSON Stop trên stdin, helper dùng:
 
 - Tiêu đề: Codex và tên project từ `cwd`.
 - Nội dung chính: dòng có nghĩa đầu tiên của `last_assistant_message`, bỏ Markdown
-  và giới hạn 95 ký tự. Không có nội dung thì báo lượt xử lý đã kết thúc.
+  và giới hạn 95 ký tự. Không có nội dung có nghĩa thì bỏ qua thông báo.
 - Dòng phụ: tên thread từ `session_id`/`thread_id`, ưu tiên tên đã đổi trong app.
   Không tìm thấy tên thì dùng ID rút gọn.
 
@@ -85,6 +85,13 @@ transcript. Tên bảng/cột dựa trên cấu trúc Codex hiện tại; nếu 
 ID rút gọn vẫn là phương án dự phòng. Stop hook trả `{}` nhanh và mở popup bằng
 process riêng, để thời gian hiển thị không giữ hook chờ. Nội dung được truyền
 như đối số, không được thực thi qua shell.
+
+Nội dung trống, chỉ có khoảng trắng/Markdown, hoặc JSON chỉ chứa giá trị rỗng
+(`{}`, `[]`, `null`, chuỗi rỗng và các cấu trúc lồng nhau tương tự) không mở
+popup. Quy tắc JSON cũng áp dụng trong code fence. Giá trị `0`, `false` và JSON
+có dữ liệu vẫn được giữ. Hook bị bỏ qua vẫn trả `{}` thành công, không tạo
+process popup. Khi gọi thủ công hoặc từ My Supporter, nội dung rỗng cũng bị bỏ
+qua; tiêu đề và dòng phụ không thay thế nội dung chính.
 
 ### Tên và icon theo project
 
@@ -135,6 +142,9 @@ Repo bỏ qua binary, build output, `.env` và cấu hình project cá nhân. Ch
 clone mã nguồn, build lại và chỉnh mapping đường dẫn để dùng trên Mac khác.
 
 ## Ghi chú phát triển
+
+Chạy `python3 tests/test_mac_alert.py` để build và kiểm tra bộ lọc nội dung cùng
+đường gọi hook của binary thật. Các bài kiểm tra không mở popup.
 
 Giữ `NSPanel`, `.nonactivatingPanel`, `canBecomeKey = false`,
 `canBecomeMain = false`, `.prohibited`, `hidesOnDeactivate = false`,
